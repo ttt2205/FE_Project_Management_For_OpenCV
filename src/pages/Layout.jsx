@@ -9,17 +9,21 @@ import {
   useUser,
   SignIn,
   useAuth,
+  useOrganizationList,
   CreateOrganization,
 } from "@clerk/clerk-react";
 import { fetchWorkspaces } from "../features/workspaceSlice";
 
 const Layout = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [syncRetries, setSyncRetries] = useState(0);
   const { loading, workspaces } = useSelector((state) => state.workspace);
   const dispatch = useDispatch();
 
   const { user, isLoaded } = useUser();
   const { getToken } = useAuth();
+  const { userMemberships } = useOrganizationList({ userMemberships: true });
+  const membershipsCount = userMemberships?.data?.length || 0;
 
   // Initial load of theme
   useEffect(() => {
@@ -31,7 +35,40 @@ const Layout = () => {
     if (isLoaded && user && workspaces.length === 0) {
       dispatch(fetchWorkspaces({ getToken }));
     }
-  }, [user, isLoaded]);
+  }, [user, isLoaded, workspaces.length, dispatch, getToken]);
+
+  // Retry a few times after Clerk organization is created, because DB sync can be delayed.
+  useEffect(() => {
+    if (workspaces.length > 0) {
+      setSyncRetries(0);
+    }
+  }, [workspaces.length]);
+
+  useEffect(() => {
+    const shouldRetrySync =
+      isLoaded &&
+      user &&
+      membershipsCount > 0 &&
+      workspaces.length === 0 &&
+      syncRetries < 5;
+
+    if (!shouldRetrySync) return;
+
+    const timer = setTimeout(async () => {
+      await dispatch(fetchWorkspaces({ getToken }));
+      setSyncRetries((prev) => prev + 1);
+    }, 2000);
+
+    return () => clearTimeout(timer);
+  }, [
+    isLoaded,
+    user,
+    membershipsCount,
+    workspaces.length,
+    syncRetries,
+    dispatch,
+    getToken,
+  ]);
 
   if (!user) {
     return (
@@ -50,8 +87,13 @@ const Layout = () => {
 
   if (user && workspaces.length === 0) {
     return (
-      <div className="min-h-screen flex justify-center items-center bg-white dark:bg-zinc-950">
-        <CreateOrganization />
+      <div className="min-h-screen flex flex-col justify-center items-center gap-3 bg-white dark:bg-zinc-950">
+        <CreateOrganization afterCreateOrganizationUrl="/" />
+        {membershipsCount > 0 && (
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            Organization da tao tren Clerk, dang dong bo xuong database...
+          </p>
+        )}
       </div>
     );
   }
